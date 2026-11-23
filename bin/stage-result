@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Records one stage result as job outputs and a step summary line.
+# A skip without a reason is recorded as failed: the determinism contract
+# allows a stage to skip, never to skip silently.
+set -euo pipefail
+
+stage=${1:?stage id}
+status=${2:?status}
+reason=${3:-}
+evidence=${4:-}
+
+case "$status" in
+  done|skipped|failed|blocked) ;;
+  *) reason="invalid status '$status': $reason"; status=failed ;;
+esac
+if [[ "$status" != done && -z "$reason" ]]; then
+  reason="status $status without a reason"
+  status=failed
+fi
+
+json=$(jq -cn --arg stage "$stage" --arg status "$status" --arg reason "$reason" --arg evidence "$evidence" \
+  '{stage: $stage, status: $status, reason: $reason, evidence: $evidence}')
+
+{
+  echo "status=$status"
+  echo "result=$json"
+} >> "${GITHUB_OUTPUT:-/dev/null}"
+echo "| $stage | $status | $reason |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+echo "$json"
+
+[[ "$status" == done || "$status" == skipped ]]

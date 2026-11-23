@@ -1,0 +1,138 @@
+name: ship
+
+# Fixed stage graph for one groomed task. Every stage runs in order and records a
+# result. Only the stage itself may decide to skip, and it must say why. A failed or
+# blocked stage stops the later stages, and the summary job reports them as missing.
+# Milestone 1: every stage is a stub that proves the wiring.
+
+on:
+  workflow_call:
+    inputs:
+      spec_path:
+        description: Path of the merged task spec in the caller repo
+        type: string
+        required: true
+      factory_ref:
+        description: Ref of razvanz/factory that the stages load scripts and skills from. Keep it equal to the ref in the caller's uses line.
+        type: string
+        default: main
+    secrets:
+      claude_code_oauth_token:
+        required: false
+
+concurrency:
+  group: ship-${{ github.repository }}-${{ inputs.spec_path }}
+  cancel-in-progress: false
+
+env:
+  FACTORY: .factory-src
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - uses: actions/checkout@v4
+        with: { path: app }
+      - id: r
+        env:
+          SPEC_PATH: ${{ inputs.spec_path }}
+        run: |
+          if [[ ! ${SPEC_PATH} =~ ^specs/[A-Za-z0-9._-]+\.md$ ]]; then
+            "$FACTORY/bin/stage-result" preflight blocked "spec path does not match specs/<name>.md"
+          elif [[ ! -f "app/${SPEC_PATH}" ]]; then
+            "$FACTORY/bin/stage-result" preflight blocked "spec ${SPEC_PATH} not found"
+          else
+            "$FACTORY/bin/stage-result" preflight done "" "spec found"
+          fi
+
+  tdd:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" tdd skipped "stub: milestone 1"'
+
+  quality:
+    needs: tdd
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" quality skipped "stub: milestone 1"'
+
+  pr:
+    needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" pr skipped "stub: milestone 1"'
+
+  qa:
+    needs: pr
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" qa skipped "prototype has no deploy target"'
+
+  notify:
+    needs: qa
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" notify skipped "stub: milestone 1"'
+
+  monitor:
+    needs: notify
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" monitor skipped "prototype has no deploy target"'
+
+  retro:
+    needs: monitor
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.r.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - id: r
+        run: '"$FACTORY/bin/stage-result" retro skipped "stub: milestone 1"'
+
+  summary:
+    if: always()
+    needs: [preflight, tdd, quality, pr, qa, notify, monitor, retro]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: '"$FACTORY/bin/summarize" "$NEEDS" preflight tdd quality pr qa notify monitor retro'

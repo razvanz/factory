@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Fails the run when an expected stage recorded no result, or recorded failed or blocked.
+# Usage: summarize '<toJSON(needs)>' stage1 stage2 ...
+set -euo pipefail
+
+needs=${1:?needs json}
+shift
+
+bad=0
+{
+  echo "## Factory run"
+  echo
+  echo "| Stage | Status | Reason |"
+  echo "|---|---|---|"
+} >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+
+for stage in "$@"; do
+  result=$(jq -r --arg s "$stage" '.[$s].outputs.result // empty' <<<"$needs")
+  if [[ -z "$result" ]]; then
+    job=$(jq -r --arg s "$stage" '.[$s].result // "absent"' <<<"$needs")
+    status=missing
+    reason="no result recorded (job $job)"
+  else
+    status=$(jq -r .status <<<"$result")
+    reason=$(jq -r .reason <<<"$result")
+  fi
+  echo "| $stage | $status | $reason |" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+  case "$status" in done|skipped) ;; *) bad=1 ;; esac
+done
+
+exit "$bad"
