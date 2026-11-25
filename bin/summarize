@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Fails the run when an expected stage recorded no result, or recorded failed or blocked.
+# Writes the stage table to the step summary and, when REPORT_FILE is set, to that file.
 # Usage: summarize '<toJSON(needs)>' stage1 stage2 ...
 set -euo pipefail
 
@@ -7,13 +8,7 @@ needs=${1:?needs json}
 shift
 
 bad=0
-{
-  echo "## Factory run"
-  echo
-  echo "| Stage | Status | Reason |"
-  echo "|---|---|---|"
-} >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
-
+table=$'| Stage | Status | Reason |\n|---|---|---|'
 for stage in "$@"; do
   result=$(jq -r --arg s "$stage" '.[$s].outputs.result // empty' <<<"$needs")
   if [[ -z "$result" ]]; then
@@ -24,8 +19,11 @@ for stage in "$@"; do
     status=$(jq -r .status <<<"$result")
     reason=$(jq -r .reason <<<"$result")
   fi
-  echo "| $stage | $status | $reason |" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+  table+=$'\n'"| $stage | $status | ${reason//|/\\|} |"
   case "$status" in done|skipped) ;; *) bad=1 ;; esac
 done
+
+printf '## Factory run\n\n%s\n' "$table" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+[[ -z "${REPORT_FILE:-}" ]] || printf '%s\n' "$table" > "$REPORT_FILE"
 
 exit "$bad"

@@ -1,6 +1,7 @@
 name: ship
 
-# Fixed stage graph for one groomed task. Every stage runs in order and records a
+# Fixed stage graph for one groomed GitHub issue. The issue is the unit of work: its
+# body holds the spec, and the summary job records the stage results on it. Every stage runs in order and records a
 # result. Only the stage itself may decide to skip, and it must say why. A failed or
 # blocked stage stops the later stages, and the summary job reports them as missing.
 # Milestone 1: every stage is a stub that proves the wiring.
@@ -8,9 +9,9 @@ name: ship
 on:
   workflow_call:
     inputs:
-      spec_path:
-        description: Path of the merged task spec in the caller repo
-        type: string
+      issue_number:
+        description: The groomed issue in the caller repo
+        type: number
         required: true
       factory_ref:
         description: Ref of razvanz/factory that the stages load scripts and skills from. Keep it equal to the ref in the caller's uses line.
@@ -21,7 +22,7 @@ on:
         required: false
 
 concurrency:
-  group: ship-${{ github.repository }}-${{ inputs.spec_path }}
+  group: ship-${{ github.repository }}-${{ inputs.issue_number }}
   cancel-in-progress: false
 
 env:
@@ -35,18 +36,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
-      - uses: actions/checkout@v4
-        with: { path: app }
       - id: r
         env:
-          SPEC_PATH: ${{ inputs.spec_path }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue_number }}
         run: |
-          if [[ ! ${SPEC_PATH} =~ ^specs/[A-Za-z0-9._-]+\.md$ ]]; then
-            "$FACTORY/bin/stage-result" preflight blocked "spec path does not match specs/<name>.md"
-          elif [[ ! -f "app/${SPEC_PATH}" ]]; then
-            "$FACTORY/bin/stage-result" preflight blocked "spec ${SPEC_PATH} not found"
+          if ! issue=$(gh issue view "${ISSUE}" --json state,body,labels 2>&1); then
+            "$FACTORY/bin/stage-result" preflight blocked "issue #${ISSUE} not readable"
+          elif [[ $(jq -r .state <<<"${issue}") != OPEN ]]; then
+            "$FACTORY/bin/stage-result" preflight blocked "issue #${ISSUE} is not open"
+          elif ! jq -r .body <<<"${issue}" | grep -qiE '^#+ *acceptance criteria'; then
+            "$FACTORY/bin/stage-result" preflight blocked "issue #${ISSUE} has no Acceptance criteria section"
           else
-            "$FACTORY/bin/stage-result" preflight done "" "spec found"
+            "$FACTORY/bin/stage-result" preflight done "" "issue #${ISSUE} is open and groomed"
           fi
 
   tdd:
@@ -133,6 +136,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { repository: razvanz/factory, ref: "${{ inputs.factory_ref }}", path: .factory-src, sparse-checkout: bin }
-      - env:
+      - id: s
+        env:
           NEEDS: ${{ toJSON(needs) }}
+          REPORT_FILE: report.md
         run: '"$FACTORY/bin/summarize" "$NEEDS" preflight tdd quality pr qa notify monitor retro'
+      - if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTCOME: ${{ steps.s.outcome }}
+        run: '"$FACTORY/bin/report-to-issue" "${ISSUE}" "${OUTCOME}" "${RUN_URL}" report.md'

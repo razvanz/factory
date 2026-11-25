@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Records the stage table on the issue in one status comment, edited in place on each run,
+# so the issue shows the latest factory state without a comment per run.
+# Usage: report-to-issue <issue> <summary step outcome> <run url> <report file>
+# Needs GH_TOKEN and GH_REPO.
+set -euo pipefail
+
+issue=${1:?issue}
+outcome=${2:?outcome}
+run_url=${3:?run url}
+report=${4:?report file}
+marker='<!-- factory:status -->'
+
+case "$outcome" in
+  success) verdict="passed" ;;
+  *) verdict="stopped" ;;
+esac
+table=$(cat "$report" 2>/dev/null || echo "No stage table: the summary step did not finish.")
+body=$(printf '%s\n### Factory run %s\n\n%s\n\n[Run log](%s)\n' "$marker" "$verdict" "$table" "$run_url")
+
+id=$(gh api "repos/${GH_REPO}/issues/${issue}/comments" --paginate \
+  --jq "[.[] | select(.user.type == \"Bot\" and (.body | startswith(\"${marker}\")))][0].id // empty")
+if [[ -n "$id" ]]; then
+  gh api -X PATCH "repos/${GH_REPO}/issues/comments/${id}" -f body="$body" >/dev/null
+else
+  gh api -X POST "repos/${GH_REPO}/issues/${issue}/comments" -f body="$body" >/dev/null
+fi
